@@ -1,0 +1,22 @@
+{
+  "name": "mvc-backend",
+  "version": "1.0.0",
+  "license": "UNLICENSED",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon index.js",
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.13.3",
+    "cors": "^2.8.6",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "ffmpeg-static": "^5.3.0",
+    "mongoose": "^7.6.3",
+    "youtube-dl-exec": "^3.1.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
