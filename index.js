@@ -162,46 +162,6 @@ const getPython310Plus = (() => {
 const getBundledYtDlpPath = () =>
     path.join(__dirname, 'node_modules', 'youtube-dl-exec', 'bin', 'yt-dlp');
 
-/** Batch-fetch channel profile images (channels.list) and attach channelThumbnailUrl to each item */
-async function enrichItemsWithChannelThumbnails(items) {
-    if (!items?.length) return items;
-    const channelIds = [
-        ...new Set(items.map((i) => i?.snippet?.channelId).filter(Boolean))
-    ];
-    if (!channelIds.length) {
-        return items.map((item) => ({ ...item, channelThumbnailUrl: null }));
-    }
-
-    const idToUrl = {};
-    try {
-        for (let i = 0; i < channelIds.length; i += 50) {
-            const chunk = channelIds.slice(i, i + 50);
-            const chRes = await axios.get(`${BASE_URL}/channels`, {
-                params: {
-                    part: 'snippet',
-                    id: chunk.join(','),
-                    key: API_KEY
-                }
-            });
-            for (const ch of chRes.data?.items || []) {
-                const url =
-                    ch.snippet?.thumbnails?.high?.url ||
-                    ch.snippet?.thumbnails?.medium?.url ||
-                    ch.snippet?.thumbnails?.default?.url ||
-                    '';
-                idToUrl[ch.id] = url;
-            }
-        }
-    } catch (e) {
-        log('warn', 'channel_thumbnails_enrich_failed', { error: e.message });
-    }
-
-    return items.map((item) => ({
-        ...item,
-        channelThumbnailUrl: idToUrl[item.snippet?.channelId] || null
-    }));
-}
-
 app.get('/api/trending', async (req, res) => {
     try {
         const pageToken = req.query.pageToken || null;
@@ -209,19 +169,18 @@ app.get('/api/trending', async (req, res) => {
             params: {
                 part: 'snippet,contentDetails,statistics',
                 chart: 'mostPopular',
-                regionCode: 'IN', // Change to your country code (e.g., IN, UK)
+                // Remove regionCode to get global trending content
                 maxResults: 20,
                 pageToken: pageToken,
                 key: API_KEY
             }
         });
-        const items = await enrichItemsWithChannelThumbnails(response.data.items || []);
         res.json({
-            items,
+            items: response.data.items,
             nextPageToken: response.data.nextPageToken || null
         });
     } catch (error) {
-        res.status(500).json(error.response?.data || { error: error.message });
+        res.status(500).json(error.response.data);
     }
 });
 
@@ -234,13 +193,13 @@ app.get('/api/search', async (req, res) => {
                 q: q,
                 maxResults: 20,
                 type: 'video',
+                order: 'relevance', // Prioritize most relevant results
                 pageToken: pageToken || null,
                 key: API_KEY
             }
         });
-        const items = await enrichItemsWithChannelThumbnails(response.data.items || []);
         res.json({
-            items,
+            items: response.data.items,
             nextPageToken: response.data.nextPageToken || null
         });
       } catch (error) {
@@ -261,6 +220,42 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
+app.get('/api/channels', async (req, res) => {
+    const ids = String(req.query.ids || '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean)
+        .slice(0, 50);
+
+    if (!ids.length) {
+        return res.status(400).json({ error: 'No channel IDs provided' });
+    }
+
+    try {
+        const response = await axios.get(`${BASE_URL}/channels`, {
+            params: {
+                part: 'snippet',
+                id: ids.join(','),
+                key: API_KEY
+            }
+        });
+
+        const thumbnails = {};
+        for (const channel of response.data.items || []) {
+            thumbnails[channel.id] =
+                channel.snippet?.thumbnails?.default?.url ||
+                channel.snippet?.thumbnails?.medium?.url ||
+                channel.snippet?.thumbnails?.high?.url || '';
+        }
+
+        res.json({ thumbnails });
+    } catch (error) {
+        log('error', 'youtube_channel_error', { error: error.message });
+        if (error.response) return res.status(error.response.status).json(error.response.data);
+        return res.status(500).json({ error: error.message });
+    }
+});
+
 app.get('/api/video/:videoId', async (req, res) => {
     const { videoId } = req.params;
     if (!/^[a-zA-Z0-9_-]{6,}$/.test(videoId)) {
@@ -278,8 +273,7 @@ app.get('/api/video/:videoId', async (req, res) => {
 
         const item = response.data?.items?.[0];
         if (!item) return res.status(404).json({ error: 'Video not found' });
-        const [enriched] = await enrichItemsWithChannelThumbnails([item]);
-        return res.json(enriched);
+        return res.json(item);
     } catch (error) {
         log('error', 'video_details_error', { error: error.message });
         if (error.response) return res.status(error.response.status).json(error.response.data);
